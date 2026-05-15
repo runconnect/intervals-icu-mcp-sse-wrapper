@@ -325,7 +325,7 @@ async def get_activity_intervals(
     operation_id="get_best_efforts",
     tags=["analysis"],
     summary="Get best efforts",
-    description="Retourne les meilleures performances d'une activité (best efforts) via l'API Intervals.icu.",
+    description="Retourne les meilleures performances d'une activité via l'API Intervals.icu, filtrées par stream et par durée ou distance.",
 )
 async def get_best_efforts(
     activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
@@ -333,12 +333,33 @@ async def get_best_efforts(
         ...,
         description="Stream requis par l'API Intervals.icu, ex: power, pace, hr",
     ),
+    duration: Optional[int] = Query(
+        None,
+        description="Durée cible en secondes pour rechercher la meilleure performance, ex: 300 pour 5 minutes",
+    ),
+    distance: Optional[int] = Query(
+        None,
+        description="Distance cible en mètres pour rechercher la meilleure performance, ex: 5000 pour 5 km",
+    ),
 ):
+    if duration is None and distance is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Au moins un paramètre duration ou distance doit être fourni",
+        )
+
+    params: Dict[str, Any] = {"stream": stream}
+    if duration is not None:
+        params["duration"] = duration
+    if distance is not None:
+        params["distance"] = distance
+
     data = await intervals_get(
         f"/activity/{activity_id}/best-efforts",
-        params={"stream": stream},
+        params=params,
     )
-    efforts = data if isinstance(data, list) else []
+
+    efforts = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
     normalized: List[Dict[str, Any]] = []
 
     for effort in efforts:
@@ -348,6 +369,7 @@ async def get_best_efforts(
             "moving_time_seconds": effort.get("moving_time"),
             "distance_meters": effort.get("distance"),
         }
+
         performance: Dict[str, Any] = {}
         for src, dst in [
             ("average_watts", "average_watts"),
@@ -360,16 +382,20 @@ async def get_best_efforts(
                 performance[dst] = effort.get(src)
         if performance:
             item["performance"] = performance
+
         if effort.get("start_index") is not None:
             item["start_index"] = effort.get("start_index")
         if effort.get("end_index") is not None:
             item["end_index"] = effort.get("end_index")
+
         normalized.append(item)
 
     return JSONResponse(
         content={
             "activity_id": activity_id,
             "stream": stream,
+            "duration": duration,
+            "distance": distance,
             "count": len(normalized),
             "best_efforts": normalized,
         }
