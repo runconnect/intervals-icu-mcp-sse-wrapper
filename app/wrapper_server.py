@@ -2,6 +2,7 @@ import os
 from typing import Optional, Dict, Any
 
 import httpx
+from fastapi import Request
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi_mcp import FastApiMCP
@@ -108,6 +109,13 @@ async def get_events(
     )
     return JSONResponse(content=data)
 
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"REQ {request.method} {request.url} headers={dict(request.headers)}")
+    response = await call_next(request)
+    print(f"RES {request.method} {request.url} -> {response.status_code}")
+    return response
 
 mcp = FastApiMCP(
     app,
