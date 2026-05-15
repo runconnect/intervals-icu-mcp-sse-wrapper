@@ -325,14 +325,22 @@ async def get_activity_intervals(
     operation_id="get_best_efforts",
     tags=["analysis"],
     summary="Get best efforts",
-    description="Retourne les meilleures performances d'une activité (best efforts) si disponibles via l'API Intervals.icu.",
+    description="Retourne les meilleures performances d'une activité (best efforts) via l'API Intervals.icu.",
 )
 async def get_best_efforts(
     activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
+    stream: str = Query(
+        ...,
+        description="Stream requis par l'API Intervals.icu, ex: power, pace, hr",
+    ),
 ):
-    data = await intervals_get(f"/activity/{activity_id}/best-efforts")
+    data = await intervals_get(
+        f"/activity/{activity_id}/best-efforts",
+        params={"stream": stream},
+    )
     efforts = data if isinstance(data, list) else []
     normalized: List[Dict[str, Any]] = []
+
     for effort in efforts:
         item: Dict[str, Any] = {
             "name": effort.get("name"),
@@ -357,7 +365,15 @@ async def get_best_efforts(
         if effort.get("end_index") is not None:
             item["end_index"] = effort.get("end_index")
         normalized.append(item)
-    return JSONResponse(content={"activity_id": activity_id, "count": len(normalized), "best_efforts": normalized})
+
+    return JSONResponse(
+        content={
+            "activity_id": activity_id,
+            "stream": stream,
+            "count": len(normalized),
+            "best_efforts": normalized,
+        }
+    )
 
 
 @app.get(
