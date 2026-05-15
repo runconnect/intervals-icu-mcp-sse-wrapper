@@ -17,7 +17,7 @@ if not INTERVALS_API_KEY or not INTERVALS_ATHLETE_ID:
 
 app = FastAPI(
     title="Intervals.icu MCP HTTP Wrapper",
-    version="1.1.0",
+    version="1.2.0",
     description="Wrapper FastAPI + MCP Streamable HTTP pour Intervals.icu avec outils analytiques",
 )
 
@@ -92,6 +92,55 @@ def get_distance_meters(activity: Dict[str, Any]) -> float:
     return 0.0
 
 
+def build_histogram_response(activity_id: str, raw_data: Any, metric: str) -> Dict[str, Any]:
+    bins = raw_data.get("bins", []) if isinstance(raw_data, dict) else []
+    result_bins: List[Dict[str, Any]] = []
+
+    for bin_item in bins:
+        item: Dict[str, Any] = {
+            "count": bin_item.get("count"),
+        }
+        if bin_item.get("secs") is not None:
+            item["time_seconds"] = bin_item.get("secs")
+
+        if metric == "power":
+            item["power_range"] = {
+                "min_watts": int(bin_item.get("min", 0)),
+                "max_watts": int(bin_item.get("max", 0)),
+            }
+        elif metric == "hr":
+            item["hr_range"] = {
+                "min_bpm": int(bin_item.get("min", 0)),
+                "max_bpm": int(bin_item.get("max", 0)),
+            }
+        elif metric == "pace":
+            min_val = float(bin_item.get("min", 0))
+            max_val = float(bin_item.get("max", 0))
+            min_minutes = int(min_val)
+            min_seconds = int(round((min_val - min_minutes) * 60))
+            max_minutes = int(max_val)
+            max_seconds = int(round((max_val - max_minutes) * 60))
+            item["pace_range"] = {
+                "min_pace_min_per_km": min_val,
+                "max_pace_min_per_km": max_val,
+                "min_pace_formatted": f"{min_minutes}:{min_seconds:02d} /km",
+                "max_pace_formatted": f"{max_minutes}:{max_seconds:02d} /km",
+            }
+        result_bins.append(item)
+
+    result: Dict[str, Any] = {
+        "activity_id": activity_id,
+        "bins": result_bins,
+        "bin_count": len(result_bins),
+    }
+    if isinstance(raw_data, dict):
+        if raw_data.get("total_count") is not None:
+            result["total_samples"] = raw_data.get("total_count")
+        if raw_data.get("total_secs") is not None:
+            result["total_time_seconds"] = raw_data.get("total_secs")
+    return result
+
+
 @app.get("/health", operation_id="health_check", tags=["system"], summary="Health check")
 async def health():
     return {
@@ -99,7 +148,7 @@ async def health():
         "service": "intervals-icu-mcp-http-wrapper",
         "mcp_endpoint": "/mcp",
         "athlete_id": INTERVALS_ATHLETE_ID,
-        "version": "1.1.0",
+        "version": "1.2.0",
     }
 
 
@@ -115,7 +164,11 @@ async def root():
             "/wellness",
             "/events",
             "/activity-streams",
+            "/activity-intervals",
             "/best-efforts",
+            "/power-histogram",
+            "/hr-histogram",
+            "/pace-histogram",
             "/running-volume-by-week",
         ],
     }
@@ -168,16 +221,16 @@ async def get_events(oldest: Optional[str] = None, newest: Optional[str] = None)
     operation_id="get_activity_streams",
     tags=["analysis"],
     summary="Get activity streams",
-    description="Retourne les streams d'une activité (watts, heartrate, cadence, distance, time, altitude, etc.).",
+    description="Retourne les streams d'une activité en utilisant la signature réelle Intervals.icu types + streams.json.",
 )
 async def get_activity_streams(
     activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
-    streams: Optional[str] = Query(None, description="Liste de streams séparés par des virgules, ex: watts,heartrate,cadence"),
+    types: Optional[str] = Query(None, description="Liste de streams séparés par des virgules, ex: watts,heartrate,cadence"),
 ):
     params: Dict[str, Any] = {}
-    if streams:
-        params["streams"] = streams
-    data = await intervals_get(f"/activity/{activity_id}/streams", params=params)
+    if types:
+        params["types"] = types
+    data = await intervals_get(f"/activity/{activity_id}/streams.json", params=params)
     available_streams = [k for k, v in data.items() if isinstance(v, list)] if isinstance(data, dict) else []
     stream_lengths = {k: len(v) for k, v in data.items() if isinstance(v, list)} if isinstance(data, dict) else {}
     result = {
@@ -187,6 +240,84 @@ async def get_activity_streams(
         "streams": data,
     }
     return JSONResponse(content=result)
+
+
+@app.get(
+    "/activity-intervals",
+    operation_id="get_activity_intervals",
+    tags=["analysis"],
+    summary="Get activity intervals",
+    description="Retourne les intervalles/segments structurés d'une activité avec performances et résumé.",
+)
+async def get_activity_intervals(
+    activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
+):
+    data = await intervals_get(f"/activity/{activity_id}/intervals")
+    intervals = data if isinstance(data, list) else []
+    intervals_data: List[Dict[str, Any]] = []
+
+    work_intervals = 0
+    rest_intervals = 0
+    total_work_time = 0
+
+    for interval in intervals:
+        interval_type = interval.get("type")
+        interval_item: Dict[str, Any] = {
+            "id": interval.get("id"),
+            "type": interval_type,
+        }
+        if interval.get("start") is not None:
+            interval_item["start_seconds"] = interval.get("start")
+        if interval.get("end") is not None:
+            interval_item["end_seconds"] = interval.get("end")
+        if interval.get("duration") is not None:
+            interval_item["duration_seconds"] = interval.get("duration")
+
+        performance: Dict[str, Any] = {}
+        for src, dst in [
+            ("average_watts", "average_watts"),
+            ("normalized_power", "normalized_power"),
+            ("average_heartrate", "average_heartrate"),
+            ("max_heartrate", "max_heartrate"),
+            ("average_cadence", "average_cadence"),
+            ("average_speed", "average_speed_meters_per_sec"),
+            ("distance", "distance_meters"),
+        ]:
+            if interval.get(src) is not None:
+                performance[dst] = interval.get(src)
+        if performance:
+            interval_item["performance"] = performance
+
+        if interval.get("target"):
+            interval_item["target_description"] = interval.get("target")
+        if interval.get("target_min") is not None or interval.get("target_max") is not None:
+            interval_item["target_range"] = {
+                "min": interval.get("target_min"),
+                "max": interval.get("target_max"),
+            }
+
+        if isinstance(interval_type, str) and "WORK" in interval_type.upper():
+            work_intervals += 1
+            if isinstance(interval.get("duration"), (int, float)):
+                total_work_time += int(interval.get("duration"))
+        if isinstance(interval_type, str) and "REST" in interval_type.upper():
+            rest_intervals += 1
+
+        intervals_data.append(interval_item)
+
+    return JSONResponse(
+        content={
+            "activity_id": activity_id,
+            "count": len(intervals_data),
+            "intervals": intervals_data,
+            "summary": {
+                "total_intervals": len(intervals_data),
+                "work_intervals": work_intervals,
+                "rest_intervals": rest_intervals,
+                "total_work_time_seconds": total_work_time,
+            },
+        }
+    )
 
 
 @app.get(
@@ -227,6 +358,48 @@ async def get_best_efforts(
             item["end_index"] = effort.get("end_index")
         normalized.append(item)
     return JSONResponse(content={"activity_id": activity_id, "count": len(normalized), "best_efforts": normalized})
+
+
+@app.get(
+    "/power-histogram",
+    operation_id="get_power_histogram",
+    tags=["analysis"],
+    summary="Get power histogram",
+    description="Retourne l'histogramme de distribution de puissance d'une activité.",
+)
+async def get_power_histogram(
+    activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
+):
+    data = await intervals_get(f"/activity/{activity_id}/power-histogram")
+    return JSONResponse(content=build_histogram_response(activity_id, data, "power"))
+
+
+@app.get(
+    "/hr-histogram",
+    operation_id="get_hr_histogram",
+    tags=["analysis"],
+    summary="Get heart rate histogram",
+    description="Retourne l'histogramme de distribution de fréquence cardiaque d'une activité.",
+)
+async def get_hr_histogram(
+    activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
+):
+    data = await intervals_get(f"/activity/{activity_id}/hr-histogram")
+    return JSONResponse(content=build_histogram_response(activity_id, data, "hr"))
+
+
+@app.get(
+    "/pace-histogram",
+    operation_id="get_pace_histogram",
+    tags=["analysis"],
+    summary="Get pace histogram",
+    description="Retourne l'histogramme de distribution d'allure d'une activité, avec plages formatées en min/km.",
+)
+async def get_pace_histogram(
+    activity_id: str = Query(..., description="Identifiant de l'activité Intervals.icu"),
+):
+    data = await intervals_get(f"/activity/{activity_id}/pace-histogram")
+    return JSONResponse(content=build_histogram_response(activity_id, data, "pace"))
 
 
 @app.get(
@@ -310,7 +483,11 @@ mcp = FastApiMCP(
         "get_wellness",
         "get_events",
         "get_activity_streams",
+        "get_activity_intervals",
         "get_best_efforts",
+        "get_power_histogram",
+        "get_hr_histogram",
+        "get_pace_histogram",
         "get_running_volume_by_week",
     ],
 )
