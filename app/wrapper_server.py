@@ -22,17 +22,15 @@ from core.utils import (
     get_distance_meters,
 )
 
-app = FastAPI(
-    title="Intervals.icu MCP HTTP Wrapper",
-    version="1.2.1",
-    description="Wrapper FastAPI + MCP Streamable HTTP pour Intervals.icu avec outils analytiques",
-)
+from routes.plans import router as plans_router
 
 app = FastAPI(
     title="Intervals.icu MCP HTTP Wrapper",
     version="1.2.1",
     description="Wrapper FastAPI + MCP Streamable HTTP pour Intervals.icu avec outils analytiques",
 )
+
+app.include_router(plans_router)
 
 """
 async def intervals_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
@@ -104,7 +102,7 @@ def get_distance_meters(activity: Dict[str, Any]) -> float:
         return float(activity["distanceKm"]) * 1000.0
     return 0.0
 """
-
+"""
 def resolve_plan_folder_id(items: List[Dict[str, Any]], plan_name: str) -> Optional[int]:
     for item in items:
         if item.get("type") == "PLAN" and item.get("name") == plan_name:
@@ -112,7 +110,7 @@ def resolve_plan_folder_id(items: List[Dict[str, Any]], plan_name: str) -> Optio
             if isinstance(plan_id, int):
                 return plan_id
     return None
-
+"""
 
 def build_histogram_response(activity_id: str, raw_data: Any, metric: str) -> Dict[str, Any]:
     bins = raw_data.get("bins", []) if isinstance(raw_data, dict) else []
@@ -270,6 +268,7 @@ async def get_activities(oldest: Optional[str] = None, newest: Optional[str] = N
     data = await fetch_activities_range(oldest, newest)
     return JSONResponse(content=data)
 
+"""
 @app.get(
     "/plan-workouts/filtered",
     operation_id="get_plan_workouts_filtered",
@@ -317,28 +316,7 @@ async def get_plan_workouts_filtered(
         params={"folder_id": folder},
     )
     
-    """
-    raw_count = len(raw_items) if isinstance(raw_items, list) else None
-    same_folder = sum(
-        1 for w in raw_items
-        if (w.get("folder_id") or w.get("folderid")) == folder
-    ) if isinstance(raw_items, list) else None
-    with_day = sum(
-        1 for w in raw_items
-        if w.get("day") is not None
-    ) if isinstance(raw_items, list) else None
-
-    return {
-        "athlete_id": INTERVALS_ATHLETE_ID,
-        "plan_name": plan_name,
-        "folder_id": folder,
-        "raw_count": raw_count,
-        "same_folder_count": same_folder,
-        "with_day_count": with_day,
-        "first_items": raw_items[:3] if isinstance(raw_items, list) else raw_items,
-    }
-    """
-    
+       
     plan_start_date = parse_date_value(plan_start)
     if not plan_start_date:
         raise HTTPException(status_code=400, detail="plan_start doit être au format YYYY-MM-DD")
@@ -408,7 +386,7 @@ async def get_plan_workouts_filtered(
         response["workouts"] = normalized
 
     return JSONResponse(content=response)
-
+"""
 
 @app.get(
     "/wellness",
