@@ -23,6 +23,7 @@ from core.utils import (
 )
 
 # import tools in wrapper_server.py
+from routes.athlete import router as athlete_router
 from routes.plans import router as plans_router
 from routes.wellness import router as wellness_router
 from routes.activities import router as activities_router
@@ -33,6 +34,7 @@ app = FastAPI(
     description="Wrapper FastAPI + MCP Streamable HTTP pour Intervals.icu avec outils analytiques",
 )
 
+app.include_router(athlete_router)
 app.include_router(plans_router)
 app.include_router(wellness_router)
 app.include_router(activities_router)
@@ -541,6 +543,8 @@ mcp = FastApiMCP(
     name="Intervals.icu Tools",
     description="Expose des outils Intervals.icu bruts et analytiques via MCP HTTP transport.",
     include_operations=[
+        "get_athlete_profile",
+        "get_fitness_summary",
         "get_activities",
         "get_activity_details",
         "search_activities_local",
