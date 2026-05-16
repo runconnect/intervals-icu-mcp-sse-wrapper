@@ -242,6 +242,46 @@ async def get_activities(oldest: Optional[str] = None, newest: Optional[str] = N
     data = await fetch_activities_range(oldest, newest)
     return JSONResponse(content=data)
 
+@app.get(
+    "/plan-workouts",
+    operation_id="get_plan_workouts",
+    tags=["planning"],
+    summary="Get workouts from a plan",
+    description="Recherche un plan par son nom dans les folders Intervals.icu, puis retourne toutes les séances associées à ce plan.",
+)
+async def get_plan_workouts(
+    plan_name: str = Query(..., description="Nom exact du plan Intervals.icu, ex: Plan_Semi"),
+):
+    folders_data = await intervals_get(f"/athlete/{INTERVALS_ATHLETE_ID}/folders")
+    folders = folders_data if isinstance(folders_data, list) else []
+
+    matching_plan = None
+    for item in folders:
+        if item.get("type") == "PLAN" and item.get("name") == plan_name:
+            matching_plan = item
+            break
+
+    if not matching_plan:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Plan '{plan_name}' introuvable dans les folders Intervals.icu",
+        )
+
+    folder_id = matching_plan.get("id")
+    workouts_data = await intervals_get(
+        f"/athlete/{INTERVALS_ATHLETE_ID}/workouts",
+        params={"folder_id": folder_id},
+    )
+    workouts = workouts_data if isinstance(workouts_data, list) else []
+
+    return JSONResponse(
+        content={
+            "plan_name": plan_name,
+            "folder_id": folder_id,
+            "count": len(workouts),
+            "workouts": workouts,
+        }
+    )
 
 @app.get(
     "/wellness",
@@ -657,6 +697,7 @@ mcp = FastApiMCP(
         "get_activity_intervals",
         "get_best_efforts",
         "get_best_efforts_debug",
+        "get_plan_workouts",
         "get_power_histogram",
         "get_hr_histogram",
         "get_pace_histogram",
