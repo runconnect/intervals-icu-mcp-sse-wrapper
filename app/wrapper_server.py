@@ -22,7 +22,9 @@ from core.utils import (
     get_distance_meters,
 )
 
+# import tools in wrapper_server.py
 from routes.plans import router as plans_router
+from routes.wellness import router as wellness_router
 
 app = FastAPI(
     title="Intervals.icu MCP HTTP Wrapper",
@@ -31,6 +33,7 @@ app = FastAPI(
 )
 
 app.include_router(plans_router)
+app.include_router(wellness_router)
 
 """
 async def intervals_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
@@ -387,7 +390,7 @@ async def get_plan_workouts_filtered(
 
     return JSONResponse(content=response)
 """
-
+"""
 @app.get(
     "/wellness",
     operation_id="get_wellness",
@@ -401,7 +404,7 @@ async def get_wellness(oldest: Optional[str] = None, newest: Optional[str] = Non
         params={"oldest": oldest, "newest": newest},
     )
     return JSONResponse(content=data)
-
+"""
 
 @app.get(
     "/events",
