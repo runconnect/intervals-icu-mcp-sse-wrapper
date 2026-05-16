@@ -20,6 +20,14 @@ def _first_not_none(*values: Any) -> Any:
     return None
 
 
+def _format_pace_seconds_per_km(value: Any) -> str | None:
+    if not isinstance(value, (int, float)) or value <= 0:
+        return None
+    minutes = int(value // 60)
+    seconds = int(value % 60)
+    return f"{minutes}:{seconds:02d} /km"
+
+
 def build_form_analysis(tsb: Any) -> Dict[str, Any]:
     if not isinstance(tsb, (int, float)):
         return {}
@@ -108,6 +116,77 @@ def build_training_recommendations(tsb: Any, ramp_rate: Any) -> List[str]:
     return recommendations
 
 
+def normalize_athlete_profile(athlete: Dict[str, Any]) -> Dict[str, Any]:
+    profile: Dict[str, Any] = {
+        "id": athlete.get("id") or INTERVALS_ATHLETE_ID,
+        "name": athlete.get("name") or athlete.get("fullname") or "Athlete",
+    }
+
+    for src, dst in [
+        ("email", "email"),
+        ("sex", "sex"),
+        ("dob", "dob"),
+        ("weight", "weight_kg"),
+        ("height", "height_cm"),
+    ]:
+        if athlete.get(src) is not None:
+            profile[dst] = athlete.get(src)
+
+    fitness: Dict[str, Any] = {}
+    for src, dst in [
+        ("ctl", "ctl"),
+        ("atl", "atl"),
+        ("tsb", "tsb"),
+        ("ramp_rate", "ramp_rate"),
+    ]:
+        if athlete.get(src) is not None:
+            fitness[dst] = _round_if_number(athlete.get(src), 1)
+
+    sports: List[Dict[str, Any]] = []
+    sport_settings = athlete.get("sport_settings") or athlete.get("sports") or []
+
+    if isinstance(sport_settings, list):
+        for sport in sport_settings:
+            if not isinstance(sport, dict):
+                continue
+
+            sport_data: Dict[str, Any] = {}
+            if sport.get("type"):
+                sport_data["type"] = sport.get("type")
+            if sport.get("ftp") is not None:
+                sport_data["ftp"] = sport.get("ftp")
+            if sport.get("fthr") is not None:
+                sport_data["fthr"] = sport.get("fthr")
+            if sport.get("pace_threshold") is not None:
+                pace_threshold = sport.get("pace_threshold")
+                sport_data["pace_threshold_seconds_per_km"] = pace_threshold
+                formatted = _format_pace_seconds_per_km(pace_threshold)
+                if formatted:
+                    sport_data["pace_threshold_formatted"] = formatted
+            if sport.get("swim_threshold") is not None:
+                sport_data["swim_threshold"] = sport.get("swim_threshold")
+
+            if sport_data:
+                sports.append(sport_data)
+
+    analysis: Dict[str, Any] = {}
+    analysis.update(build_form_analysis(athlete.get("tsb")))
+    analysis.update(build_ramp_rate_analysis(athlete.get("ramp_rate")))
+
+    result: Dict[str, Any] = {
+        "profile": profile,
+        "fitness": fitness,
+    }
+
+    if sports:
+        result["sports"] = sports
+    if analysis:
+        result["analysis"] = analysis
+
+    result["raw_json"] = athlete
+    return result
+
+
 def normalize_fitness_summary_from_wellness(
     athlete_name: str,
     wellness_record: Dict[str, Any],
@@ -176,6 +255,23 @@ def normalize_fitness_summary_from_wellness(
         "analysis": analysis,
         "raw_wellness_json": wellness_record,
     }
+
+
+@router.get(
+    "/athlete/profile",
+    operation_id="get_athlete_profile",
+    tags=["athlete"],
+    summary="Get athlete profile",
+    description="Retourne le profil athlète, les métriques présentes sur le profil et les réglages par sport.",
+)
+async def get_athlete_profile():
+    athlete = await intervals_get(f"/athlete/{INTERVALS_ATHLETE_ID}")
+    if not isinstance(athlete, dict):
+        return JSONResponse(
+            status_code=502,
+            content={"detail": "Réponse athlète invalide depuis Intervals.icu"},
+        )
+    return JSONResponse(content=normalize_athlete_profile(athlete))
 
 
 @router.get(
