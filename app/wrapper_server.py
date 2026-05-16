@@ -257,8 +257,13 @@ async def get_activities(oldest: Optional[str] = None, newest: Optional[str] = N
     data = await fetch_activities_range(oldest, newest)
     return JSONResponse(content=data)
 
+@app.get(
+    "/plan-workouts/filtered",
+    operation_id="get_plan_workouts_filtered",
+    tags=["plans"],
+    summary="Filtre les workouts d'un plan",
+)
 
-@app.get("/plan-workouts/filtered", tags=["plans"], summary="Filtre les workouts d'un plan")
 async def get_plan_workouts_filtered(
     plan_name: str = Query(..., description="Nom logique du plan, ex: Plan_Semi"),
     plan_start: str = Query(..., description="Date de début du plan (YYYY-MM-DD)"),
