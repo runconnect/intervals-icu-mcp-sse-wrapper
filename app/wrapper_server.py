@@ -243,15 +243,24 @@ async def get_activities(oldest: Optional[str] = None, newest: Optional[str] = N
     return JSONResponse(content=data)
 
 @app.get(
-    "/plan-workouts",
-    operation_id="get_plan_workouts",
+    "/plan-workouts-mirror",
+    operation_id="get_plan_workouts_mirror",
     tags=["planning"],
-    summary="Get workouts from a plan",
-    description="Recherche un plan par son nom dans les folders Intervals.icu, puis retourne toutes les séances associées à ce plan.",
+    summary="Get mirrored workouts from a plan",
+    description="Recherche un plan par son nom dans les folders Intervals.icu, récupère ses séances, puis applique une transformation miroir avec date calculée, external_id, raw_json et mirror_seen.",
 )
-async def get_plan_workouts(
+async def get_plan_workouts_mirror(
     plan_name: str = Query(..., description="Nom exact du plan Intervals.icu, ex: Plan_Semi"),
+    plan_start: str = Query(..., description="Date de départ du plan au format YYYY-MM-DD, ex: 2026-02-02"),
 ):
+    try:
+        plan_start_date = date.fromisoformat(plan_start)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="plan_start doit être une date ISO valide au format YYYY-MM-DD",
+        )
+
     folders_data = await intervals_get(f"/athlete/{INTERVALS_ATHLETE_ID}/folders")
     folders = folders_data if isinstance(folders_data, list) else []
 
@@ -268,18 +277,47 @@ async def get_plan_workouts(
         )
 
     folder_id = matching_plan.get("id")
+
     workouts_data = await intervals_get(
         f"/athlete/{INTERVALS_ATHLETE_ID}/workouts",
         params={"folder_id": folder_id},
     )
     workouts = workouts_data if isinstance(workouts_data, list) else []
 
+    mirrored_workouts: List[Dict[str, Any]] = []
+
+    for workout in workouts:
+        day_value = workout.get("day")
+        if not isinstance(day_value, int):
+            continue
+
+        workout_date = plan_start_date + timedelta(days=day_value)
+        workout_date_str = workout_date.isoformat()
+        workout_type = workout.get("type") or ""
+        external_id = f"{INTERVALS_ATHLETE_ID}-{folder_id}-{workout_date_str}-{workout_type}"
+
+        mirrored_workouts.append(
+            {
+                "athlete_id": INTERVALS_ATHLETE_ID,
+                "folderid": folder_id,
+                "day": day_value,
+                "date": workout_date_str,
+                "type": workout_type,
+                "name": workout.get("name") or "",
+                "description": workout.get("description") or "",
+                "external_id": external_id,
+                "raw_json": workout,
+                "mirror_seen": True,
+            }
+        )
+
     return JSONResponse(
         content={
             "plan_name": plan_name,
+            "plan_start": plan_start,
             "folder_id": folder_id,
-            "count": len(workouts),
-            "workouts": workouts,
+            "count": len(mirrored_workouts),
+            "workouts": mirrored_workouts,
         }
     )
 
@@ -697,7 +735,7 @@ mcp = FastApiMCP(
         "get_activity_intervals",
         "get_best_efforts",
         "get_best_efforts_debug",
-        "get_plan_workouts",
+        "get_plan_workouts_mirror",
         "get_power_histogram",
         "get_hr_histogram",
         "get_pace_histogram",
